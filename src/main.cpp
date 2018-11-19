@@ -92,14 +92,42 @@ int main() {
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
 
+//          Eigen::Map<Eigen::VectorXd> ptsx_vec(ptsx.data(), ptsx.size());
+//          Eigen::Map<Eigen::VectorXd> ptsy_vec(ptsy.data(), ptsy.size());
+//          cout << "ptsx = " << ptsx_vec << endl;
+//          cout << "ptsy = " << ptsy_vec << endl;
+//          cout << "(x,y,psi) = (" << px << "," << py << "," << psi << ")" << endl;
+
+          // Convert to car-coordinate system
+
+          vector<double> relx;
+          vector<double> rely;
+
+          for (size_t i = 0; i < ptsx.size(); i++) {
+            double x = ptsx.at(i) - px;
+            double y = ptsy.at(i) - py;
+            double xrot = x * cos(psi) + y * sin(psi);
+            double yrot = y * cos(psi) - x * sin(psi);
+            relx.push_back(xrot);
+            rely.push_back(yrot);
+          }
+
+          Eigen::Map<Eigen::VectorXd> relx_vec(relx.data(), relx.size());
+          Eigen::Map<Eigen::VectorXd> rely_vec(rely.data(), rely.size());
+//          cout << "relx = " << relx_vec << endl;
+//          cout << "rely = " << rely_vec << endl;
+
+          auto coeffs = polyfit(relx_vec, rely_vec, 3);
+          cout << "coeffs = " << coeffs << endl;
+
           /*
           * TODO: Calculate steering angle and throttle using MPC.
           *
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          double steer_value = 0.0;
+          double throttle_value = 0.3;
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -111,21 +139,17 @@ int main() {
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
 
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Green line
+          for (size_t i = 0; i < relx.size(); i++) {
+            // DEBUG: show fitted polynomial
+            mpc_x_vals.push_back(relx.at(i));
+            mpc_y_vals.push_back(polyeval(coeffs, relx.at(i)));
+          }
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
-          //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
-
-          //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
-
-          msgJson["next_x"] = next_x_vals;
-          msgJson["next_y"] = next_y_vals;
+          msgJson["next_x"] = relx;
+          msgJson["next_y"] = rely;
 
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
