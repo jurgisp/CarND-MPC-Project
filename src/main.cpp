@@ -12,10 +12,6 @@
 // for convenience
 using json = nlohmann::json;
 
-// For converting back and forth between radians and degrees.
-constexpr double pi() { return M_PI; }
-double deg2rad(double x) { return x * pi() / 180; }
-double rad2deg(double x) { return x * 180 / pi(); }
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -65,11 +61,18 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
+double prev_x, prev_y, prev_v;
+chrono::system_clock::time_point prev_t = chrono::system_clock::now();
+
 int main() {
   uWS::Hub h;
 
   // MPC is initialized here!
   MPC mpc;
+  Eigen::VectorXd coeffs(3);
+  coeffs << 1.0, 0, 0;
+  auto res = mpc.Solve(10, coeffs);
+  cout << "MPC action: " << res.at(0) << ", " << res.at(1) << endl;
 
   h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
@@ -77,7 +80,7 @@ int main() {
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+//    cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -90,7 +93,19 @@ int main() {
           double px = j[1]["x"];
           double py = j[1]["y"];
           double psi = j[1]["psi"];
-          double v = j[1]["speed"];
+          double v = (double)j[1]["speed"] * 0.44704; // Convert speed to m/s
+          chrono::system_clock::time_point t = chrono::system_clock::now();
+
+          double dtime = chrono::duration_cast<chrono::milliseconds>(t - prev_t).count() / 1000.0;
+          auto ddistance = sqrt(pow(px - prev_x, 2) + pow(py - prev_y, 2));
+          auto dvelocity = v - prev_v;
+
+          cout << "v=" << v << ", ds/dt=" << ddistance/dtime << ", dv/dt=" << dvelocity/dtime << ", dt=" << dtime << endl;
+
+          prev_x = px;
+          prev_y = py;
+          prev_v = v;
+          prev_t = t;
 
 //          Eigen::Map<Eigen::VectorXd> ptsx_vec(ptsx.data(), ptsx.size());
 //          Eigen::Map<Eigen::VectorXd> ptsy_vec(ptsy.data(), ptsy.size());
@@ -118,7 +133,7 @@ int main() {
 //          cout << "rely = " << rely_vec << endl;
 
           auto coeffs = polyfit(relx_vec, rely_vec, 3);
-          cout << "coeffs = " << coeffs << endl;
+//          cout << "coeffs = " << coeffs << endl;
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -153,7 +168,7 @@ int main() {
 
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+//          std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
