@@ -64,6 +64,7 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
 }
 
 double prev_x, prev_y, prev_v;
+double prev_delta, prev_a;
 chrono::system_clock::time_point prev_t = chrono::system_clock::now();
 
 int main() {
@@ -73,8 +74,11 @@ int main() {
   MPC mpc;
   Eigen::VectorXd coeffs(3);
 
-//  coeffs << 5, 0, 0;
-//  mpc.Solve(coeffs, 0, 10);
+//  coeffs << 1, 0, 0;
+//  mpc.Solve(coeffs, 0, 10, 0.1, 1);
+
+  prev_delta = 0;
+  prev_a = 0;
 
   h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
@@ -135,7 +139,9 @@ int main() {
 
           double delta, a;
           vector<double> mpc_x, mpc_y;
-          tie(delta, a, mpc_x, mpc_y) = mpc.Solve(coeffs, v, VELOCITY_TARGET * MPH_TO_MS);
+          tie(delta, a, mpc_x, mpc_y) = mpc.Solve(coeffs, v, VELOCITY_TARGET * MPH_TO_MS, prev_delta, prev_a);
+          prev_delta = delta;
+          prev_a = a;
 
           // Map (delta,a) to (steer,throttle)
 
@@ -143,7 +149,8 @@ int main() {
           double steer_value = - delta / (25 / 180.0 * M_PI);
           // TODO: not quite correct, throttle is not proportional to acceleration
           // throttle=1 at velocity=0 results in 5m/s2 acceleration
-          double throttle_value = a / 5;
+//          double throttle_value = a / 5;
+          double throttle_value = 0.3;
 
           // Steer and Throttle must be in [-1, 1]
           if (steer_value < -1) steer_value = -1;

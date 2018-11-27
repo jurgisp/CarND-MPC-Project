@@ -14,7 +14,12 @@ class MPC {
 
   // Solve the model given an initial state and polynomial coefficients.
   // Returns (delta0, a0, mpc_x, mpc_y).
-  tuple<double, double, vector<double>, vector<double>> Solve(Eigen::VectorXd coeffs, double v0, double ref_v);
+  tuple<double, double, vector<double>, vector<double>> Solve(
+          Eigen::VectorXd coeffs,
+          double v0,
+          double ref_v,
+          double last_delta,
+          double last_a);
 };
 
 #endif /* MPC_H */
