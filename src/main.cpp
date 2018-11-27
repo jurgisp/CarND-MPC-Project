@@ -9,7 +9,8 @@
 #include "MPC.h"
 #include "json.hpp"
 
-const double velocity_target = 10.;
+const double VELOCITY_TARGET = 20.; // MPH
+const double MPH_TO_MS = 0.44704;
 
 // for convenience
 using json = nlohmann::json;
@@ -96,7 +97,7 @@ int main() {
           double px = j[1]["x"];
           double py = j[1]["y"];
           double psi = j[1]["psi"];
-          double v = (double)j[1]["speed"] * 0.44704; // Convert speed to m/s
+          double v = (double)j[1]["speed"] * MPH_TO_MS; // Convert speed to m/s
 
           // Measure velocity and acceleration (for debugging and inspection)
 
@@ -134,7 +135,7 @@ int main() {
 
           double delta, a;
           vector<double> mpc_x, mpc_y;
-          tie(delta, a, mpc_x, mpc_y) = mpc.Solve(coeffs, v, velocity_target);
+          tie(delta, a, mpc_x, mpc_y) = mpc.Solve(coeffs, v, VELOCITY_TARGET * MPH_TO_MS);
 
           // Map (delta,a) to (steer,throttle)
 

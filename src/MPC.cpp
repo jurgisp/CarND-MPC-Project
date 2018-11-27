@@ -5,6 +5,9 @@
 
 using CppAD::AD;
 
+const double max_delta = 25. / 180.0 * M_PI;
+const double max_a = 5.;
+
 const size_t N = 20;
 const double dt = 0.1;
 
@@ -12,12 +15,10 @@ const size_t x_start = 0;
 const size_t y_start = N;
 const size_t psi_start = 2 * N;
 const size_t v_start = 3 * N;
-const size_t cte_start = 4 * N;
-const size_t epsi_start = 5 * N;
-const size_t delta_start = 6 * N;
-const size_t a_start = 6 * N + (N - 1);
-const size_t n_vars = 6 * N + 2 * (N - 1);
-const size_t n_constraints = 6 * N;
+const size_t delta_start = 4 * N;
+const size_t a_start = 4 * N + (N - 1);
+const size_t n_vars = 4 * N + 2 * (N - 1);
+const size_t n_constraints = 4 * N;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -69,9 +70,18 @@ class FG_eval {
 
     // The part of the cost based on the reference state.
     for (size_t t = 0; t < N; t++) {
-      fg[0] += CppAD::pow(vars[cte_start + t], 2);
-      fg[0] += CppAD::pow(vars[epsi_start + t], 2);
-      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
+      AD<double> x = vars[x_start + t];
+      AD<double> y = vars[y_start + t];
+      AD<double> psi = vars[psi_start + t];
+      AD<double> v = vars[v_start + t];
+
+      AD<double> f = polyeval(coeffs, x);
+      AD<double> df = polyderiveval(coeffs, x);
+      AD<double> psides = CppAD::atan(df);
+
+      fg[0] += CppAD::pow(f - y, 2);
+      fg[0] += CppAD::pow(psi - psides, 2);
+      fg[0] += CppAD::pow(v - ref_v, 2);
     }
 
     // Minimize the use of actuators.
@@ -92,8 +102,6 @@ class FG_eval {
     fg[1 + y_start] = vars[y_start];
     fg[1 + psi_start] = vars[psi_start];
     fg[1 + v_start] = vars[v_start] - v0;
-    fg[1 + cte_start] = vars[cte_start] - coeffs[0]; // coeffs[0] == value at x=0
-    fg[1 + epsi_start] = vars[epsi_start] - CppAD::atan(coeffs[1]); // coeffs[1] == derivative at x=0
 
     // Constraints between steps
 
@@ -103,40 +111,26 @@ class FG_eval {
       AD<double> y1 = vars[y_start + t];
       AD<double> psi1 = vars[psi_start + t];
       AD<double> v1 = vars[v_start + t];
-      AD<double> cte1 = vars[cte_start + t];
-      AD<double> epsi1 = vars[epsi_start + t];
 
       // The state at time t.
       AD<double> x0 = vars[x_start + t - 1];
       AD<double> y0 = vars[y_start + t - 1];
       AD<double> psi0 = vars[psi_start + t - 1];
       AD<double> v0 = vars[v_start + t - 1];
-      AD<double> cte0 = vars[cte_start + t - 1];
-      AD<double> epsi0 = vars[epsi_start + t - 1];
 
       // Only consider the actuation at time t.
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
-
-      AD<double> f0 = polyeval(coeffs, x0);
-      AD<double> df0 = polyderiveval(coeffs, x0);
-      AD<double> psides0 = CppAD::atan(df0);
 
       // Equations for the model:
       // x_[t] = x[t-1] + v[t-1] * cos(psi[t-1]) * dt
       // y_[t] = y[t-1] + v[t-1] * sin(psi[t-1]) * dt
       // psi_[t] = psi[t-1] + v[t-1] / Lf * delta[t-1] * dt
       // v_[t] = v[t-1] + a[t-1] * dt
-      // cte[t] = f(x[t-1]) - y[t-1] + v[t-1] * sin(epsi[t-1]) * dt
-      // epsi[t] = psi[t] - psides[t-1] + v[t-1] * delta[t-1] / Lf * dt
       fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
       fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
       fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
       fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
-      fg[1 + cte_start + t] =
-              cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
-      fg[1 + epsi_start + t] =
-              epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
     }
   }
 };
@@ -171,19 +165,15 @@ tuple<double, double, vector<double>, vector<double>> MPC::Solve(Eigen::VectorXd
   vars[y_start] = 0;
   vars[psi_start] = 0;
   vars[v_start] = v0;
-  vars[cte_start] = coeffs[0]; // Value at x=0
-  vars[epsi_start] = CppAD::atan(coeffs[1]); // Derivative at x=0
 
   // Set bounds only for actuator variables
 
   for (size_t t = 0; t < N-1; t++) {
-    vars_lowerbound[delta_start + t] = -25 / 180.0 * M_PI;
-    vars_upperbound[delta_start + t] = 25 / 180.0 * M_PI;
-
-    vars_lowerbound[a_start + t] = -5;
-    vars_upperbound[a_start + t] = 5;
+    vars_lowerbound[delta_start + t] = -max_delta;
+    vars_upperbound[delta_start + t] = max_delta;
+    vars_lowerbound[a_start + t] = -max_a;
+    vars_upperbound[a_start + t] = max_a;
   }
-
 
   // Lower and upper limits for the constraints
   // Should be 0 besides initial state.
