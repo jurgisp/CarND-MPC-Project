@@ -9,9 +9,10 @@
 #include "MPC.h"
 #include "json.hpp"
 
+const double velocity_target = 10.;
+
 // for convenience
 using json = nlohmann::json;
-
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -70,9 +71,9 @@ int main() {
   // MPC is initialized here!
   MPC mpc;
   Eigen::VectorXd coeffs(3);
-  coeffs << 1.0, 0, 0;
-  auto res = mpc.Solve(10, coeffs);
-  cout << "MPC action: " << res.at(0) << ", " << res.at(1) << endl;
+
+//  coeffs << 5, 0, 0;
+//  mpc.Solve(coeffs, 0, 10);
 
   h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
@@ -87,31 +88,27 @@ int main() {
         auto j = json::parse(s);
         string event = j[0].get<string>();
         if (event == "telemetry") {
-          // j[1] is the data JSON object
+
+          // Parse data
+
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
           double px = j[1]["x"];
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = (double)j[1]["speed"] * 0.44704; // Convert speed to m/s
-          chrono::system_clock::time_point t = chrono::system_clock::now();
 
+          // Measure velocity and acceleration (for debugging and inspection)
+
+          chrono::system_clock::time_point t = chrono::system_clock::now();
           double dtime = chrono::duration_cast<chrono::milliseconds>(t - prev_t).count() / 1000.0;
           auto ddistance = sqrt(pow(px - prev_x, 2) + pow(py - prev_y, 2));
           auto dvelocity = v - prev_v;
-
           cout << "v=" << v << ", ds/dt=" << ddistance/dtime << ", dv/dt=" << dvelocity/dtime << ", dt=" << dtime << endl;
-
           prev_x = px;
           prev_y = py;
           prev_v = v;
           prev_t = t;
-
-//          Eigen::Map<Eigen::VectorXd> ptsx_vec(ptsx.data(), ptsx.size());
-//          Eigen::Map<Eigen::VectorXd> ptsy_vec(ptsy.data(), ptsy.size());
-//          cout << "ptsx = " << ptsx_vec << endl;
-//          cout << "ptsy = " << ptsy_vec << endl;
-//          cout << "(x,y,psi) = (" << px << "," << py << "," << psi << ")" << endl;
 
           // Convert to car-coordinate system
 
@@ -127,42 +124,40 @@ int main() {
             rely.push_back(yrot);
           }
 
+          // Polynomial fit
+
           Eigen::Map<Eigen::VectorXd> relx_vec(relx.data(), relx.size());
           Eigen::Map<Eigen::VectorXd> rely_vec(rely.data(), rely.size());
-//          cout << "relx = " << relx_vec << endl;
-//          cout << "rely = " << rely_vec << endl;
-
           auto coeffs = polyfit(relx_vec, rely_vec, 3);
-//          cout << "coeffs = " << coeffs << endl;
 
-          /*
-          * TODO: Calculate steering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          *
-          */
-          double steer_value = 0.0;
-          double throttle_value = 0.3;
+          // MPC solve
+
+          double delta, a;
+          vector<double> mpc_x, mpc_y;
+          tie(delta, a, mpc_x, mpc_y) = mpc.Solve(coeffs, v, velocity_target);
+
+          // Map (delta,a) to (steer,throttle)
+
+          // Steering angle is negative of delta (1. == -25 degrees)
+          double steer_value = - delta / (25 / 180.0 * M_PI);
+          // TODO: not quite correct, throttle is not proportional to acceleration
+          // throttle=1 at velocity=0 results in 5m/s2 acceleration
+          double throttle_value = a / 5;
+
+          // Steer and Throttle must be in [-1, 1]
+          if (steer_value < -1) steer_value = -1;
+          if (steer_value > 1) steer_value = 1;
+          if (throttle_value < -1) throttle_value = -1;
+          if (throttle_value > 1) throttle_value = 1;
+          cout << "steering=" << steer_value << ", throttle=" << throttle_value << endl;
+
+          // Form message
 
           json msgJson;
-          // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
-          // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
-
-          //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
-
-          for (size_t i = 0; i < relx.size(); i++) {
-            // DEBUG: show fitted polynomial
-            mpc_x_vals.push_back(relx.at(i));
-            mpc_y_vals.push_back(polyeval(coeffs, relx.at(i)));
-          }
-
-          msgJson["mpc_x"] = mpc_x_vals;
-          msgJson["mpc_y"] = mpc_y_vals;
-
+          msgJson["mpc_x"] = mpc_x;
+          msgJson["mpc_y"] = mpc_y;
           msgJson["next_x"] = relx;
           msgJson["next_y"] = rely;
 

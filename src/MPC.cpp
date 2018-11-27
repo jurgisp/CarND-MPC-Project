@@ -5,8 +5,6 @@
 
 using CppAD::AD;
 
-const double ref_v = 10;
-
 const size_t N = 20;
 const double dt = 0.1;
 
@@ -53,7 +51,14 @@ class FG_eval {
  public:
   // Fitted polynomial coefficients
   Eigen::VectorXd coeffs;
-  FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
+  double v0;
+  double ref_v;
+
+  FG_eval(Eigen::VectorXd coeffs, double v0, double ref_v) {
+    this->coeffs = coeffs;
+    this->v0 = v0;
+    this->ref_v = ref_v;
+  }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
   void operator()(ADvector& fg, const ADvector& vars) {
@@ -86,9 +91,9 @@ class FG_eval {
     fg[1 + x_start] = vars[x_start];
     fg[1 + y_start] = vars[y_start];
     fg[1 + psi_start] = vars[psi_start];
-    fg[1 + v_start] = vars[v_start];
-    fg[1 + cte_start] = vars[cte_start];
-    fg[1 + epsi_start] = vars[epsi_start];
+    fg[1 + v_start] = vars[v_start] - v0;
+    fg[1 + cte_start] = vars[cte_start] - coeffs[0]; // coeffs[0] == value at x=0
+    fg[1 + epsi_start] = vars[epsi_start] - CppAD::atan(coeffs[1]); // coeffs[1] == derivative at x=0
 
     // Constraints between steps
 
@@ -142,9 +147,11 @@ class FG_eval {
 MPC::MPC() {}
 MPC::~MPC() {}
 
-vector<double> MPC::Solve(double v, Eigen::VectorXd coeffs) {
+tuple<double, double, vector<double>, vector<double>> MPC::Solve(Eigen::VectorXd coeffs, double v0, double ref_v) {
   bool ok = true;
   typedef CPPAD_TESTVECTOR(double) Dvector;
+
+  chrono::system_clock::time_point timer = chrono::system_clock::now();
 
   // Initial value of the independent variables.
   // SHOULD BE 0 besides initial state.
@@ -163,9 +170,9 @@ vector<double> MPC::Solve(double v, Eigen::VectorXd coeffs) {
   vars[x_start] = 0;
   vars[y_start] = 0;
   vars[psi_start] = 0;
-  vars[v_start] = v;
+  vars[v_start] = v0;
   vars[cte_start] = coeffs[0]; // Value at x=0
-  vars[epsi_start] = coeffs[1]; // Derivative at x=0
+  vars[epsi_start] = CppAD::atan(coeffs[1]); // Derivative at x=0
 
   // Set bounds only for actuator variables
 
@@ -188,7 +195,7 @@ vector<double> MPC::Solve(double v, Eigen::VectorXd coeffs) {
   }
 
   // object that computes objective and constraints
-  FG_eval fg_eval(coeffs);
+  FG_eval fg_eval(coeffs, v0, ref_v);
 
   //
   // NOTE: You don't have to worry about these options
@@ -219,15 +226,29 @@ vector<double> MPC::Solve(double v, Eigen::VectorXd coeffs) {
   // Check some of the solution values
   ok &= solution.status == CppAD::ipopt::solve_result<Dvector>::success;
 
-  // Cost
-  auto cost = solution.obj_value;
-  std::cout << "Cost " << cost << std::endl;
-
-  for (size_t i = 0; i < N-1; i++) {
-    cout << "(x, y) = (" << solution.x[x_start+i] << ", " << solution.x[y_start+i] << ") ";
-    cout << "(v, psi) = (" << solution.x[v_start+i] << ", " << solution.x[psi_start+i] << ") ";
-    cout << "(delt, a) = (" << solution.x[delta_start+i] << ", " << solution.x[a_start+i] << ") " << endl;
+  if (ok) {
+    auto cost = solution.obj_value;
+    long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - timer).count();
+    cout << "MPC solved in " << elapsed_ms << "ms: ";
+    cout << "delta=" << solution.x[delta_start] << ", a=" << solution.x[a_start];
+    cout << " cost=" << cost << endl;
+  }
+  else {
+    // Assuming MPC succeeds, throw exception otherwise
+    cout << "MPC failed - panic" << endl;
+    abort();
   }
 
-  return {solution.x[delta_start], solution.x[a_start]};
+  vector<double> mpc_x;
+  vector<double> mpc_y;
+
+  for (size_t i = 0; i < N-1; i++) {
+    mpc_x.push_back(solution.x[x_start+i]);
+    mpc_y.push_back(solution.x[y_start+i]);
+//    cout << "(x, y) = (" << solution.x[x_start+i] << ", " << solution.x[y_start+i] << ") ";
+//    cout << "(v, psi) = (" << solution.x[v_start+i] << ", " << solution.x[psi_start+i] << ") ";
+//    cout << "(delt, a) = (" << solution.x[delta_start+i] << ", " << solution.x[a_start+i] << ") " << endl;
+  }
+
+  return {solution.x[delta_start], solution.x[a_start], mpc_x, mpc_y};
 }
