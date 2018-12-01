@@ -150,7 +150,7 @@ int main() {
           // TODO: not quite correct, throttle is not proportional to acceleration
           // throttle=1 at velocity=0 results in 5m/s2 acceleration
 //          double throttle_value = a / 5;
-          double throttle_value = 0.3;
+          double throttle_value = 0.2;
 
           // Steer and Throttle must be in [-1, 1]
           if (steer_value < -1) steer_value = -1;
