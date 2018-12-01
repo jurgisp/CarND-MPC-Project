@@ -2,6 +2,7 @@
 #include <cppad/cppad.hpp>
 #include <cppad/ipopt/solve.hpp>
 #include "Eigen-3.3/Eigen/Core"
+#include <chrono>
 
 using CppAD::AD;
 
@@ -248,11 +249,11 @@ tuple<double, double, vector<double>, vector<double>> MPC::Solve(
 //    cout << "(delt, a) = (" << solution.x[delta_start+i] << ", " << solution.x[a_start+i] << ") " << endl;
     }
 
-    return {solution.x[delta_start+1], solution.x[a_start+1], mpc_x, mpc_y};
+    return make_tuple(solution.x[delta_start+1], solution.x[a_start+1], mpc_x, mpc_y);
   }
   else {
     cout << "MPC failed - returning last values" << endl;
-    return {last_delta, last_a, mpc_x, mpc_y};
+    return make_tuple(last_delta, last_a, mpc_x, mpc_y);
   }
 
 }
