@@ -3,6 +3,95 @@ Self-Driving Car Engineer Nanodegree Program
 
 ---
 
+## Project Writeup
+
+### MPC equations
+
+I use 4 variables to model the sate:
+* `x[t], y[t]` - coordinates (in car-relative frame)
+* `psi[t]` - angle
+* `v[t]` - velocity
+
+And two actuator variables:
+* `delta[t]` - turn angle
+* `a[t]` - acceleration
+
+The update equations are then:
+```
+x[t] = x[t-1] + v[t-1] * cos(psi[t-1]) * dt
+y[t] = y[t-1] + v[t-1] * sin(psi[t-1]) * dt
+psi[t] = psi[t-1] + v[t-1] / Lf * delta[t-1] * dt
+v[t] = v[t-1] + a[t-1] * dt
+```
+
+Diffrently from the examples in the class, I don't model CTE and Psi_error as explicit state variables, because there is no need - they don't have independent update equations, and are just intermediate variables when calculating the MPC cost.
+
+### MPC cost function
+
+The cost function is the following:
+```
+MPC_cost = 
+  sum( (f(x[t]) - y[t])^2 ) +           // Cross-track error
+  sum( (atan(f'(x[t])) - psi[t])^2 ) +  // Psi error
+  sum( (v[t] - v_ref)^2 ) +             // Velocity error
+  sum( (delta[t])^2 ) +                 // Minimize delta
+  sum( (a[t])^2 ) +                     // Minimize acceleration
+  sum( (delta[t] - delta[t-1])^2 ) +    // Minimize change in delta
+  sum( (a[t] - a[t-1])^2 )              // Minimize change in acceleration
+```
+
+### MPC initial conditions
+
+Initial conditions for state is trivial, because the car starts at (0, 0, 0) in car-relative coordinates:
+* `x[0] = y[0] = psi[0] = 0`
+* `v[0] = v_current`
+
+Additionally we restrict the initial delta and a to be the last action:
+* `delta[0] = delta_last`
+* `a[0] = a_last`
+
+Fixing action at `t=0` solves two problems simultaneously:
+
+* It allows for the smooth action change term `sum((delta[t] - delta[t-1])^2)` to function properly. If we don't fix `delta[0]`, then we don't a way to ensure that the next `delta` action will be similar to the last.
+
+* It *automatically* models the latency of one step, because the action that we return to the actuators are `(delta[1], a[1])`, which is the action that is appropriate `dt` time later.
+
+### Handling latency
+
+We solve the latency by fixing the action at the first step to be whatever it is. That way MPC itself assumes that we can not change the action for the first step (`dt` time), and only adjust the action at `(delta[1], a[1])`, which is `dt` time later.
+
+Thus our choice of `dt` is correlated with the latency - we set it to be
+* `dt = 150ms`
+
+Which is, from measurement, the average time between actuator updates. That consists of `100ms` artificial lag, plus `~50ms` lag to solve MPC.
+
+### Choice of (N, dt)
+
+Our choice of `dt` is constrained by the latency modelling to be `150ms`, as described above.
+
+That leaves us the choice of `N`, which is simply the tradeoff between time horizon (the bigger the better), and MPC solver latency (the bigger the worse). We choose `N=10` because that seems enough.
+
+### Acceleration vs Throttle
+
+There is a problem that MPC models actuator as acceleration `a[t]`, but the input that the car accepts is actually `throttle in [-1, 1]`. I found from experiments that:
+* `throttle=1` results in `a=5m/s^2` at `v=0`
+* For higher `v` same throttle results in smaller acceleration, up to a point where fixed `throttle` provides no acceleration, just keeps velocity constant.
+* I didn't work out the exact functional correspondence `a(v,throttle)`, though it would be possible, and MPC could model that.
+
+Without modelling the throttle properly, it is actually misleading to have `a[t]` as actuator variable, because we can't actually control the car correctly according to the MPC output.
+
+In the end I worked around this by forcing MPC to assume no acceleration, and outputting constant `throttle=0.3` to the car. The car then accelerates to about `v~25mph`, at which point acceleration goes to zero, and the MPC model becomes correct, just by modelling `delta[t]`.
+
+To improve this part, we would need to have `throttle[t]` in the MPC model as actuator variable, and derive the correct state update equations for that.
+
+### Fitting waypoint polynomial
+
+Polynomial `y=f[x]` is derived straighforwardly by:
+1. Transforming global waypoint coordinates to car-local coordinates, using the global car reference coordinates.
+1. Fitting the polynomial to car-relative waypoint coordinates
+
+---
+
 ## Dependencies
 
 * cmake >= 3.5
